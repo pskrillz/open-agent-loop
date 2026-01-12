@@ -23,14 +23,17 @@ from agent_loop.output import (
     agent_error,
     agent_info,
 )
-from agent_loop.cli_input import get_user_command
+from agent_loop.cli_input import get_user_command, ask_continue
 from agent_loop.signals import setup_signal_handlers
 from agent_loop.constants import (
     PLAIN_FORMAT_INSTRUCTION,
     MARKDOWN_FORMAT_INSTRUCTION,
     HELP_MESSAGE,
+    DEFAULT_MAX_ITERATIONS,
+    DEFAULT_PROMPT_ON_COMPLETION,
 )
 from agent_loop.exceptions import GracefulExit
+from agent_loop.loop_control import should_continue_iteration
 import importlib.metadata
 
 # Load environment variables - local .env takes priority over config directory
@@ -87,17 +90,28 @@ class AgentLoop:
     """
 
     def __init__(
-        self, debug: bool = False, safe: bool = False, simple_text: bool = False
+        self,
+        debug: bool = False,
+        safe: bool = False,
+        simple_text: bool = False,
+        max_iterations: int = DEFAULT_MAX_ITERATIONS,
+        prompt_on_completion: bool = DEFAULT_PROMPT_ON_COMPLETION,
     ):
         """
         Initialize the AgentLoop.
         :param debug: Show tool input/output for debugging.
         :param safe: Require confirmation before executing tools.
         :param simple_text: Use plain text output instead of markdown.
+        :param max_iterations: Maximum number of agent iteration cycles.
+        :param prompt_on_completion: Prompt user when completion is detected.
         """
         self.debug = debug
         self.safe = safe
         self.simple_text = simple_text
+        self.max_iterations = max_iterations
+        self.prompt_on_completion = prompt_on_completion
+        self.current_iteration = 0
+        self.tool_call_history: list[str] = []
         self.interrupt_event: asyncio.Event = asyncio.Event()
 
     def user_input(self) -> Optional[List[Dict]]:
@@ -231,8 +245,18 @@ class AgentLoop:
         msg = self.user_input()
         if msg is None:
             return
+        
+        # Reset iteration counter for new task
+        self.current_iteration = 0
+        self.tool_call_history.clear()
+        
         while True:
-            spinner = Halo(text="Thinking...", spinner="dots")
+            # Increment iteration at the start of each cycle
+            self.current_iteration += 1
+            spinner = Halo(
+                text=f"Thinking... (iteration {self.current_iteration}/{self.max_iterations})",
+                spinner="dots",
+            )
             spinner.start()
             try:
                 self.interrupt_event.clear()
@@ -266,6 +290,10 @@ class AgentLoop:
             agent_reply(f"💬 Agent: {response}", simple_text=self.simple_text)
             if tool_calls:
                 tool_results = []
+                
+                # Track tool calls in history
+                for tc in tool_calls:
+                    self.tool_call_history.append(tc["name"])
 
                 for tc in tool_calls:
                     self.interrupt_event.clear()
@@ -354,10 +382,77 @@ class AgentLoop:
                     continue
 
                 msg = tool_results
+                
+                # Check if we should continue iterating after tool execution
+                should_stop, stop_reason, user_prompt = should_continue_iteration(
+                    self.current_iteration,
+                    self.max_iterations,
+                    response,
+                    tool_calls,
+                    self.tool_call_history,
+                )
+                
+                if should_stop:
+                    if user_prompt and self.prompt_on_completion:
+                        # Soft stop - ask user if they want to continue
+                        if not ask_continue(user_prompt, self.simple_text):
+                            agent_info(f"🛑 Stopping: {stop_reason}", simple_text=self.simple_text)
+                            return
+                        else:
+                            agent_info("▶️  Continuing at user request...", simple_text=self.simple_text)
+                            # Reset iteration counter to give more room
+                            self.current_iteration = 0
+                            self.tool_call_history.clear()
+                    else:
+                        # Hard stop - no user prompt
+                        agent_error(f"🛑 Stopping: {stop_reason}", simple_text=self.simple_text)
+                        return
             else:
-                msg = self.user_input()
-                if msg is None:
-                    return
+                # No tool calls - check for completion before prompting user
+                should_stop, stop_reason, user_prompt = should_continue_iteration(
+                    self.current_iteration,
+                    self.max_iterations,
+                    response,
+                    [],  # No tool calls
+                    self.tool_call_history,
+                )
+                
+                if should_stop:
+                    if user_prompt and self.prompt_on_completion:
+                        # Soft stop - ask user if they want to continue
+                        if not ask_continue(user_prompt, self.simple_text):
+                            agent_info(f"🛑 Stopping: {stop_reason}", simple_text=self.simple_text)
+                            return
+                        else:
+                            agent_info("▶️  Continuing at user request...", simple_text=self.simple_text)
+                            # Reset iteration counter to give more room
+                            self.current_iteration = 0
+                            self.tool_call_history.clear()
+                            msg = self.user_input()
+                            if msg is None:
+                                return
+                    else:
+                        # Hard stop - no user prompt
+                        agent_error(f"🛑 Stopping: {stop_reason}", simple_text=self.simple_text)
+                        return
+                else:
+                    msg = self.user_input()
+                    if msg is None:
+                        return
+
+
+def load_loop_config() -> dict:
+    """
+    Load agent loop configuration from environment variables with defaults.
+    Returns dict with max_iterations and prompt_on_completion.
+    """
+    max_iterations = int(os.getenv("MAX_ITERATIONS", str(DEFAULT_MAX_ITERATIONS)))
+    prompt_on_completion = os.getenv("PROMPT_ON_COMPLETION", "true").lower() == "true"
+    
+    return {
+        "max_iterations": max_iterations,
+        "prompt_on_completion": prompt_on_completion,
+    }
 
 
 def create_llm() -> callable:
@@ -434,7 +529,22 @@ async def agent_main() -> None:
                 action="store_true",
                 help="Use plain text output instead of Rich formatting",
             )
+            parser.add_argument(
+                "--max-iterations",
+                type=int,
+                help=f"Maximum agent iteration cycles (default: {DEFAULT_MAX_ITERATIONS})",
+            )
+            parser.add_argument(
+                "--no-prompt-on-completion",
+                action="store_true",
+                help="Disable prompting when completion is detected (auto-stop instead)",
+            )
             args = parser.parse_args()
+            
+            # Load configuration with CLI args taking priority
+            loop_config = load_loop_config()
+            max_iterations = args.max_iterations if args.max_iterations else loop_config["max_iterations"]
+            prompt_on_completion = not args.no_prompt_on_completion and loop_config["prompt_on_completion"]
 
             # Start spinner for MCP loading
             mcp_spinner = Halo(text="🔌 Loading MCP servers...", spinner="dots")
@@ -461,8 +571,17 @@ async def agent_main() -> None:
 
             loop_obj = asyncio.get_event_loop()
             agent = AgentLoop(
-                debug=args.debug, safe=args.safe, simple_text=args.simple_text
+                debug=args.debug,
+                safe=args.safe,
+                simple_text=args.simple_text,
+                max_iterations=max_iterations,
+                prompt_on_completion=prompt_on_completion,
             )
+            
+            # Display configuration
+            print(f"🔧 [Config] MAX_ITERATIONS={max_iterations}")
+            print(f"🔧 [Config] PROMPT_ON_COMPLETION={prompt_on_completion}")
+            
             setup_signal_handlers(loop_obj, agent.interrupt_event)
             await agent.run_loop(create_llm())
         print("\n👋 Goodbye!")

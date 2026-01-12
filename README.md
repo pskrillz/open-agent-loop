@@ -83,6 +83,62 @@ All components are designed for modularity, minimalism, and functional programmi
 
 ---
 
+## Loop Control and Pragmatic Stopping
+
+Agent Loop includes intelligent stopping mechanisms to prevent runaway iterations and excessive token usage:
+
+### Iteration Limits
+
+- **Maximum iterations**: Configurable hard limit (default: 20) prevents infinite loops
+- **Progress display**: Shows current iteration count in real-time
+- **Configuration**: Set via `MAX_ITERATIONS` env var or `--max-iterations` CLI flag
+
+### Completion Detection
+
+The agent automatically detects when a task is complete by recognizing:
+- Explicit completion phrases ("task complete", "finished", "done")
+- Brief responses with no further tool calls
+- Agent providing summaries without requesting more actions
+
+When completion is detected, the system prompts you to confirm before stopping, allowing you to:
+- **Stop**: End the session if the task is truly complete
+- **Continue**: Give the agent more iterations if additional work is needed
+
+### Repetition Detection
+
+Prevents infinite loops by detecting:
+- Same tool called 5+ times consecutively
+- Alternating patterns (e.g., bash → filesystem → bash → filesystem...)
+- Repeated sequences of tool calls
+
+When repetition is detected, the agent stops immediately with a clear explanation.
+
+### Configuration
+
+```bash
+# In ~/.config/agent-loop/.env or local .env
+MAX_ITERATIONS=20              # Maximum thinking cycles
+PROMPT_ON_COMPLETION=true      # Ask before stopping on completion
+```
+
+```bash
+# Via CLI
+agent-loop --max-iterations 50                # Override iteration limit
+agent-loop --no-prompt-on-completion          # Auto-stop without prompting
+```
+
+### System Prompt Guidance
+
+The agent is instructed to:
+- Complete requested tasks precisely, then stop
+- Avoid "while I'm here" improvements
+- Not add unrequested features, documentation, or tests
+- Provide summaries when work is complete instead of continuing
+
+This ensures the agent stays focused on your actual request and doesn't waste tokens on unnecessary elaboration.
+
+---
+
 ## Graceful Exit and Signal Handling
 
 - **CTRL+C**: Interrupts the current operation and returns to the prompt (does not exit).
@@ -101,6 +157,7 @@ Agent Loop automatically supports both synchronous and asynchronous LLM function
 
 - Conversational AI agent powered by Anthropic Claude or OpenAI GPT
 - **Configurable AI provider and temperature** via environment variables
+- **Pragmatic loop control** with iteration limits and completion detection
 - Tool execution with optional human confirmation (`--safe` mode)
 - Debug mode for transparency (`--debug`)
 - **Custom tools support** with automatic discovery and display
@@ -509,12 +566,14 @@ Change colors, add emphasis, or create your own style! See the [Rich style guide
 
 ## 🚀 CLI Flags
 
-| Flag                  | Description                                                       |
-| --------------------- | ----------------------------------------------------------------- |
-| `--simple-text`, `-s` | Output plain ASCII text (no Rich, no Markdown)                    |
-| `--safe`              | Require confirmation before executing any tool                    |
-| `--debug`             | Show tool input/output for transparency                           |
-| `--model`             | Select the LLM model (e.g., `gpt-4o`, `claude-3-7-sonnet-latest`) |
+| Flag                        | Description                                                       |
+| --------------------------- | ----------------------------------------------------------------- |
+| `--simple-text`, `-s`       | Output plain ASCII text (no Rich, no Markdown)                    |
+| `--safe`                    | Require confirmation before executing any tool                    |
+| `--debug`                   | Show tool input/output for transparency                           |
+| `--model`                   | Select the LLM model (e.g., `gpt-4o`, `claude-3-7-sonnet-latest`) |
+| `--max-iterations N`        | Set maximum agent iteration cycles (default: 20)                  |
+| `--no-prompt-on-completion` | Disable prompting when completion detected (auto-stop instead)    |
 
 ---
 

@@ -61,3 +61,40 @@ def get_user_command(simple_text: bool) -> Optional[str]:
         except Exception as e:
             print(f"\nInput error: {e}")
             continue
+
+
+def ask_continue(prompt_message: str, simple_text: bool = False) -> bool:
+    """
+    Ask user if they want to continue after completion detection.
+    
+    Args:
+        prompt_message: The message to display to the user
+        simple_text: Whether to use simple text output
+    
+    Returns:
+        True if user wants to continue, False to stop
+        
+    Handles CTRL+C gracefully (treats as "no").
+    """
+    try:
+        with InterruptHandler() as handler:
+            try:
+                response = input(prompt_message).strip().lower()
+            except EOFError:
+                # CTRL+D pressed - treat as "no"
+                return False
+            
+            # Check if CTRL+C was pressed
+            if handler.interrupted:
+                print("\n[Interrupted] Treating as 'no'")
+                return False
+            
+            # Accept y, yes as continue
+            return response in {"y", "yes"}
+    
+    except KeyboardInterrupt:
+        print("\n[Interrupted] Treating as 'no'")
+        return False
+    except Exception:
+        # On any error, default to stopping (fail-safe)
+        return False

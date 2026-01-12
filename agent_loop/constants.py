@@ -9,3 +9,7 @@ MARKDOWN_FORMAT_INSTRUCTION = "(Format your answer using markdown syntax. Use ma
 
 # User interface messages
 HELP_MESSAGE = "[AgentLoop] Press CTRL+C to interrupt and return to prompt. Press CTRL+D or type 'exit'/'quit' to quit.\n"
+
+# Agent loop control defaults
+DEFAULT_MAX_ITERATIONS = 20
+DEFAULT_PROMPT_ON_COMPLETION = True
