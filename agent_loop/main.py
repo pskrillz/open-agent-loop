@@ -34,7 +34,7 @@ from agent_loop.constants import (
     DEFAULT_PROMPT_ON_COMPLETION,
 )
 from agent_loop.exceptions import GracefulExit
-from agent_loop.loop_control import should_continue_iteration
+from agent_loop.loop_control import should_continue_iteration, create_tool_signature
 import importlib.metadata
 
 # Load environment variables - local .env takes priority over config directory
@@ -112,7 +112,7 @@ class AgentLoop:
         self.max_iterations = max_iterations
         self.prompt_on_completion = prompt_on_completion
         self.current_iteration = 0
-        self.tool_call_history: list[str] = []
+        self.tool_call_history: list[tuple[str, str]] = []
         self.interrupt_event: asyncio.Event = asyncio.Event()
 
     def user_input(self) -> Optional[List[Dict]]:
@@ -217,9 +217,10 @@ class AgentLoop:
         """
         tool_results = []
         
-        # Track tool names in history
+        # Track tool signatures (name + arguments) in history
         for tc in tool_calls:
-            self.tool_call_history.append(tc["name"])
+            tool_signature = create_tool_signature(tc["name"], tc.get("input", {}))
+            self.tool_call_history.append(tool_signature)
         
         # Execute each tool
         for tc in tool_calls:
@@ -322,6 +323,9 @@ class AgentLoop:
         
         if not should_stop:
             # Continue normally - get next user input
+            # Reset counter and history for new user request
+            self.current_iteration = 0
+            self.tool_call_history.clear()
             return self.user_input()
         
         # Handle stop decision
@@ -462,6 +466,9 @@ class AgentLoop:
                 msg = self.user_input()
                 if msg is None:
                     return
+                # Reset counter and history for new user request
+                self.current_iteration = 0
+                self.tool_call_history.clear()
                 continue
             
             response, tool_calls = llm_result
@@ -474,6 +481,9 @@ class AgentLoop:
                     msg = self.user_input()
                     if msg is None:
                         return
+                    # Reset counter and history for new user request
+                    self.current_iteration = 0
+                    self.tool_call_history.clear()
                     continue
                 
                 # Check loop control AFTER tool execution

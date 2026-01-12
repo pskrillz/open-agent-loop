@@ -3,7 +3,9 @@ Loop control logic for agent iterations.
 Pure functions for detecting completion, repetition, and determining when to stop.
 """
 
-from typing import Tuple, List, Optional
+import json
+import hashlib
+from typing import Tuple, List, Optional, Dict, Any
 
 # Completion signal phrases (lowercase for case-insensitive matching)
 COMPLETION_PHRASES = [
@@ -17,6 +19,28 @@ COMPLETION_PHRASES = [
     "that's all",
     "that completes",
 ]
+
+
+def create_tool_signature(tool_name: str, tool_input: Dict[str, Any]) -> Tuple[str, str]:
+    """
+    Create a signature tuple for a tool call to track uniqueness.
+    
+    Args:
+        tool_name: Name of the tool being called
+        tool_input: Dictionary of arguments passed to the tool
+    
+    Returns:
+        (tool_name, arg_hash) tuple where arg_hash is a short hash of the arguments
+    
+    This allows detecting when the SAME tool is called with the SAME arguments repeatedly,
+    which is true repetitive behavior, vs calling the same tool with different arguments,
+    which is legitimate investigation/work.
+    """
+    # Sort keys for consistent hashing
+    normalized = json.dumps(tool_input, sort_keys=True, default=str)
+    # Create short hash (first 12 chars sufficient for collision avoidance)
+    arg_hash = hashlib.sha256(normalized.encode()).hexdigest()[:12]
+    return (tool_name, arg_hash)
 
 
 def detect_completion_signals(response: str, tool_calls: list) -> Tuple[bool, str]:
@@ -56,50 +80,60 @@ def detect_completion_signals(response: str, tool_calls: list) -> Tuple[bool, st
 
 
 def detect_repetitive_behavior(
-    tool_history: List[str], 
+    tool_history: List[Tuple[str, str]], 
     window_size: int = 3
 ) -> Tuple[bool, str]:
     """
     Detect if agent is repeating same tool pattern in a loop.
     
     Args:
-        tool_history: List of recent tool names called (oldest first)
+        tool_history: List of (tool_name, arg_hash) tuples (oldest first)
         window_size: Number of consecutive calls to check for repetition
     
     Returns:
         (is_repeating, reason) tuple
         
-    Detects patterns like: [bash, filesystem, bash, filesystem, bash, filesystem]
+    Now checks BOTH tool name AND arguments. Only flags as repetitive when
+    the same tool is called with identical arguments multiple times.
+    
+    Detects patterns like:
+    - Same tool with same args 5+ times: [(bash, abc123), (bash, abc123), ...]
+    - Alternating identical calls: [(bash, abc), (grep, def), (bash, abc), (grep, def), ...]
+    - Repeated sequences: [(a, x), (b, y), (c, z), (a, x), (b, y), (c, z)]
     """
     # Need at least some history to detect patterns
     if len(tool_history) < 5:
         return False, ""
     
-    # Check for single tool being called repeatedly (same tool 5+ times in a row)
+    # Check for identical tool calls (same tool + args) 5+ times in a row
     if len(tool_history) >= 5:
         last_five = tool_history[-5:]
         if len(set(last_five)) == 1:
-            return True, f"Tool '{last_five[0]}' called 5 times consecutively"
+            tool_name = last_five[0][0]
+            return True, f"Identical call to '{tool_name}' (same arguments) repeated 5 times"
     
-    # Check for alternating pattern (A, B, A, B, A, B)
+    # Check for alternating pattern (A, B, A, B, A, B) with same arguments
     if len(tool_history) >= 6:
         last_six = tool_history[-6:]
         # Check if it's an alternating pattern
         if (last_six[0] == last_six[2] == last_six[4] and 
             last_six[1] == last_six[3] == last_six[5] and 
             last_six[0] != last_six[1]):
-            pattern = f"{last_six[0]} ↔ {last_six[1]}"
-            return True, f"Detected alternating pattern: {pattern}"
+            tool_a = last_six[0][0]
+            tool_b = last_six[1][0]
+            pattern = f"{tool_a} ↔ {tool_b}"
+            return True, f"Detected alternating pattern with identical args: {pattern}"
     
-    # Check for repeated sequence patterns (ABC, ABC)
+    # Check for repeated sequence patterns (ABC, ABC) with same arguments
     if len(tool_history) >= window_size * 2:
         recent_tools = tool_history[-window_size * 2:]
         first_half = recent_tools[:window_size]
         second_half = recent_tools[window_size:]
         
         if first_half == second_half:
-            pattern = " → ".join(first_half)
-            return True, f"Detected repetitive sequence: {pattern}"
+            tool_names = [t[0] for t in first_half]
+            pattern = " → ".join(tool_names)
+            return True, f"Detected repetitive sequence with identical args: {pattern}"
     
     return False, ""
 
@@ -109,7 +143,7 @@ def should_continue_iteration(
     max_iterations: int,
     response: str,
     tool_calls: list,
-    tool_history: List[str],
+    tool_history: List[Tuple[str, str]],
 ) -> Tuple[bool, str, Optional[str]]:
     """
     Main decision function - composes all checks to determine if agent should continue.

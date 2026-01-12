@@ -106,10 +106,16 @@ When completion is detected, the system prompts you to confirm before stopping, 
 
 ### Repetition Detection
 
-Prevents infinite loops by detecting:
-- Same tool called 5+ times consecutively
-- Alternating patterns (e.g., bash → filesystem → bash → filesystem...)
-- Repeated sequences of tool calls
+Prevents infinite loops by detecting **argument-aware** patterns:
+- Same tool with **identical arguments** called 5+ times consecutively
+- Alternating patterns with identical calls (e.g., same bash command → same file write → repeat...)
+- Repeated sequences of tool calls with identical arguments
+
+**Important**: The detection is argument-aware, meaning:
+- ✅ Calling `bash` with different commands (legitimate investigation) is **allowed**
+- ❌ Calling `bash` with the **same command** 5+ times is **blocked**
+
+This prevents false positives while still catching true stuck behaviors.
 
 When repetition is detected, the agent stops immediately with a clear explanation.
 
