@@ -264,14 +264,27 @@ class AgentLoop:
                 while not llm_task.done():
                     await asyncio.sleep(0.1)
                     if self.interrupt_event.is_set():
+                        llm_task.cancel()
                         break
+                
                 if self.interrupt_event.is_set():
                     spinner.stop()
+                    # Wait for task to fully cancel
+                    with suppress(asyncio.CancelledError):
+                        await llm_task
                     msg = self.user_input()
                     if msg is None:
                         return
                     continue
+                
                 response, tool_calls = llm_task.result()
+            except asyncio.CancelledError:
+                # Task was cancelled, return to prompt
+                spinner.stop()
+                msg = self.user_input()
+                if msg is None:
+                    return
+                continue
             except Exception as e:
                 spinner.stop()
                 error_msg = f"❌ [LLM Error] {type(e).__name__}: {str(e)}"
@@ -308,6 +321,9 @@ class AgentLoop:
                                 break
 
                         if self.interrupt_event.is_set():
+                            # Wait for task to fully cancel, then break
+                            with suppress(asyncio.CancelledError):
+                                await tool_fut
                             break
 
                         result = await tool_fut
