@@ -4,8 +4,14 @@ import json
 from agent_loop.utils import load_system_prompt
 
 
-def create_openai_llm(model: str, api_key: str, temperature: float):
-    client = openai.OpenAI(api_key=api_key)
+def create_openai_llm(model: str, api_key: str, temperature: float, base_url: str = None):
+    # Create OpenAI client with optional custom base URL
+    client_kwargs = {"api_key": api_key}
+    if base_url:
+        client_kwargs["base_url"] = base_url
+        print(f"Using custom OpenAI-compatible provider: {base_url}")
+
+    client = openai.OpenAI(**client_kwargs)
     messages = []
 
     print(f"Using OpenAI model: {model} (temperature: {temperature})")

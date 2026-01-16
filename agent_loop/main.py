@@ -538,19 +538,22 @@ def load_loop_config() -> dict:
 
 def create_llm() -> callable:
     """
-    Create and return the LLM function using Anthropic or OpenAI, depending on environment variables.
+    Create and return the LLM function using Anthropic, OpenAI, or custom provider, depending on environment variables.
     """
     # Read and validate provider preference
     preferred_provider = os.getenv("AI_PROVIDER", "anthropic").lower()
-    if preferred_provider not in ("anthropic", "openai"):
+    if preferred_provider not in ("anthropic", "openai", "custom"):
         raise ValueError(
-            f"Invalid AI_PROVIDER: {preferred_provider}. Must be 'anthropic' or 'openai'."
+            f"Invalid AI_PROVIDER: {preferred_provider}. Must be 'anthropic', 'openai', or 'custom'."
         )
 
     anthropic_key = os.getenv("ANTHROPIC_API_KEY")
     anthropic_model = os.getenv("ANTHROPIC_MODEL", "claude-sonnet-4-20250514")
     openai_key = os.getenv("OPENAI_API_KEY")
     openai_model = os.getenv("OPENAI_MODEL", "gpt-4o")
+    custom_base_url = os.getenv("CUSTOM_BASE_URL")
+    custom_api_key = os.getenv("CUSTOM_API_KEY")
+    custom_model = os.getenv("CUSTOM_MODEL", "gpt-4o")
 
     temperature = os.getenv("AI_TEMPERATURE", 0.7)
 
@@ -562,13 +565,17 @@ def create_llm() -> callable:
     print(f"🔧 [Config] AI_TEMPERATURE={temperature}")
     print(f"🔧 [Config] ANTHROPIC_KEY={'✓' if anthropic_key else '✗'}")
     print(f"🔧 [Config] OPENAI_KEY={'✓' if openai_key else '✗'}")
+    if preferred_provider == "custom":
+        print(f"🔧 [Config] CUSTOM_BASE_URL={custom_base_url if custom_base_url else '✗'}")
+        print(f"🔧 [Config] CUSTOM_API_KEY={'✓' if custom_api_key else '✗'}")
+        print(f"🔧 [Config] CUSTOM_MODEL={custom_model}")
 
     # Use the preferred provider and validate its API key
     if preferred_provider == "anthropic":
         if not anthropic_key:
             raise EnvironmentError(
                 f"AI_PROVIDER is set to 'anthropic' but ANTHROPIC_API_KEY is not set. "
-                f"Please set ANTHROPIC_API_KEY or change AI_PROVIDER to 'openai'."
+                f"Please set ANTHROPIC_API_KEY or change AI_PROVIDER to 'openai' or 'custom'."
             )
         print(f"✅ [Provider] Using: Anthropic")
         return create_anthropic_llm(anthropic_model, anthropic_key, temperature)
@@ -576,10 +583,23 @@ def create_llm() -> callable:
         if not openai_key:
             raise EnvironmentError(
                 f"AI_PROVIDER is set to 'openai' but OPENAI_API_KEY is not set. "
-                f"Please set OPENAI_API_KEY or change AI_PROVIDER to 'anthropic'."
+                f"Please set OPENAI_API_KEY or change AI_PROVIDER to 'anthropic' or 'custom'."
             )
         print(f"✅ [Provider] Using: OpenAI")
         return create_openai_llm(openai_model, openai_key, temperature)
+    elif preferred_provider == "custom":
+        if not custom_api_key:
+            raise EnvironmentError(
+                f"AI_PROVIDER is set to 'custom' but CUSTOM_API_KEY is not set. "
+                f"Please set CUSTOM_API_KEY or change AI_PROVIDER to 'anthropic' or 'openai'."
+            )
+        if not custom_base_url:
+            raise EnvironmentError(
+                f"AI_PROVIDER is set to 'custom' but CUSTOM_BASE_URL is not set. "
+                f"Please set CUSTOM_BASE_URL or change AI_PROVIDER to 'anthropic' or 'openai'."
+            )
+        print(f"✅ [Provider] Using: Custom OpenAI-Compatible ({custom_base_url})")
+        return create_openai_llm(custom_model, custom_api_key, temperature, base_url=custom_base_url)
 
 
 async def agent_main() -> None:
