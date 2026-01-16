@@ -66,7 +66,7 @@
 - **Human-in-the-Loop:** Add `--safe` to require confirmation before any tool runs.
 - **Functional Programming:** Clean, composable, and testable code.
 - **DevOps Ready:** Integrates with Bash, Python, Docker, Git, Kubernetes, AWS, and more.
-- **Multi-Provider:** Supports both Anthropic Claude and OpenAI GPT models.
+- **Multi-Provider:** Supports Anthropic Claude, OpenAI GPT, and any OpenAI-compatible provider (NanoGPT, GLM, Together, Groq, etc.).
 - **MCP Integration:** Dynamically loads and uses tools/services from any MCP-compatible server (see below).
 
 ---
@@ -401,7 +401,7 @@ You can use the `.env.example` file from the source repository as a template. At
 
 ```text
 # AI Configuration
-AI_PROVIDER=anthropic  # Choose: anthropic (default) or openai
+AI_PROVIDER=anthropic  # Choose: anthropic (default), openai, or custom
 AI_TEMPERATURE=0.7     # Model temperature: 0.0-2.0 (default: 0.7)
 
 # Anthropic
@@ -411,6 +411,12 @@ ANTHROPIC_MODEL=claude-sonnet-4-20250514  # Optional, defaults to claude-3-7-son
 # OpenAI
 OPENAI_API_KEY=your_openai_api_key
 OPENAI_MODEL=gpt-4o  # Optional, defaults to gpt-4o
+
+# Custom OpenAI-Compatible Provider
+# Use this for NanoGPT, GLM, Together, Groq, or any OpenAI-compatible endpoint
+CUSTOM_BASE_URL=https://api.nano-gpt.com/v1
+CUSTOM_API_KEY=your_custom_api_key
+CUSTOM_MODEL=gpt-4o  # Model name to use with custom provider
 
 # Jira (Optional)
 JIRA_BASE_URL=your_jira_instance_url
@@ -432,7 +438,10 @@ CONFLUENCE_API_TOKEN=your_confluence_api_token
 
 - Set `AI_PROVIDER=anthropic` to use Claude models (default)
 - Set `AI_PROVIDER=openai` to use GPT models
-- If the preferred provider's API key is missing, the application will automatically fall back to the available provider
+- Set `AI_PROVIDER=custom` to use any OpenAI-compatible provider (NanoGPT, GLM, Together, Groq, etc.)
+  - When using `custom`, you must also set `CUSTOM_BASE_URL`, `CUSTOM_API_KEY`, and `CUSTOM_MODEL`
+  - The custom provider must expose an OpenAI-compatible `/v1/chat/completions` endpoint
+- If the preferred provider's API key is missing, the application will provide a clear error message
 
 **Temperature Control:**
 
